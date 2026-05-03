@@ -20,14 +20,33 @@ local localPlayer = Players.LocalPlayer
 local OWNER_ID = 8114658601
 local isOwner = (localPlayer.UserId == OWNER_ID)
 
--- Anti-ScriptUser Kick feature
-local autoKickScriptUsers = false
+-- Auto-kick feature
+local autoKickEnabled = false
 
 -- Mark that this script is loaded for this player
 local scriptLoadedTag = Instance.new("BoolValue")
 scriptLoadedTag.Name = "ScriptLoaded"
 scriptLoadedTag.Value = true
 scriptLoadedTag.Parent = localPlayer
+
+-- Function to kick a player from using the script
+local function kickFromScript(targetPlayer, reason)
+    if not targetPlayer then return false end
+    
+    local tag = targetPlayer:FindFirstChild("ScriptLoaded")
+    if tag then
+        tag:Destroy()
+        pcall(function()
+            game:GetService("StarterGui"):SetCore("SendNotification", {
+                Title = "❌ Kicked From Script",
+                Text = "You were kicked by the script owner! Reason: " .. reason,
+                Duration = 5
+            })
+        end)
+        return true
+    end
+    return false
+end
 
 -- Function to notify all players using the script
 local function notifyAllUsers(message, title)
@@ -43,99 +62,6 @@ local function notifyAllUsers(message, title)
         end
     end
 end
-
--- Function to kick a player (client-side kick from the script)
-local function kickPlayerFromScript(targetPlayer, reason)
-    if not targetPlayer then return false end
-    
-    -- This kicks them from the SCRIPT (not the game server)
-    -- Their script will stop working
-    pcall(function()
-        -- Remove their ScriptLoaded tag so they can't use features
-        local tag = targetPlayer:FindFirstChild("ScriptLoaded")
-        if tag then
-            tag:Destroy()
-        end
-        
-        -- Notify them
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "❌ KICKED FROM SCRIPT",
-            Text = "You have been kicked from using this script by owner @capmPH\nReason: " .. reason,
-            Duration = 10
-        })
-        
-        -- Clear their GUI or break their script (they need to re-execute)
-        -- This effectively removes script access
-    end)
-    
-    -- Notify owner
-    game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "✅ Player Kicked",
-        Text = targetPlayer.Name .. " has been kicked from using your script!",
-        Duration = 3
-    })
-    
-    return true
-end
-
--- Check if an attacker is using your script
-local function isUsingScript(player)
-    return player and player:FindFirstChild("ScriptLoaded") ~= nil
-end
-
--- Detect when you get hit
-local function setupHitDetection()
-    local character = localPlayer.Character
-    if not character then return end
-    
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
-    -- Listen for damage
-    local connection
-    connection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
-        if not autoKickScriptUsers then return end
-        
-        local currentHealth = humanoid.Health
-        local lastHealth = humanoid:GetAttribute("LastHealth") or currentHealth
-        
-        -- If health decreased (got hit)
-        if currentHealth < lastHealth then
-            local damage = lastHealth - currentHealth
-            
-            -- Find who hit you by checking nearby players with weapons
-            for _, player in pairs(Players:GetPlayers()) do
-                if player ~= localPlayer and isUsingScript(player) then
-                    local char = player.Character
-                    if char then
-                        local rootPart = char:FindFirstChild("HumanoidRootPart")
-                        local myRoot = character:FindFirstChild("HumanoidRootPart")
-                        if rootPart and myRoot then
-                            local dist = (rootPart.Position - myRoot.Position).Magnitude
-                            -- If they're close (within attack range), they probably hit you
-                            if dist <= 15 then
-                                kickPlayerFromScript(player, "Hit the script owner!")
-                                notifyAllUsers(player.Name .. " was kicked for attacking " .. localPlayer.Name, "🔨 AUTO-KICK")
-                                break
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        
-        humanoid:SetAttribute("LastHealth", currentHealth)
-    end)
-    
-    -- Store connection for cleanup
-    _G.hitDetectionConnection = connection
-end
-
--- Re-setup when character respawns
-localPlayer.CharacterAdded:Connect(function()
-    task.wait(1)
-    setupHitDetection()
-end)
 
 -- Notify everyone that someone joined
 notifyAllUsers(localPlayer.Name .. " has joined the script! (ID: " .. localPlayer.UserId .. ")", "🔔 New Script User")
@@ -176,22 +102,32 @@ local killAuraEnabled = false
 local multiHitEnabled = false
 local attackRange = 30
 local attackDelay = 0.5
+local selectedCategory = "Sword" -- "Sword" or "Axe"
 
--- Weapon list
-local weaponList = {"Iron Sword", "Golden Sword", "Diamond Sword", "Netherite Sword", 
-                    "Iron Axe", "Golden Axe", "Diamond Axe", "Netherite Axe"}
+-- Weapon categories
+local weaponCategories = {
+    Sword = {"Iron Sword", "Golden Sword", "Diamond Sword", "Netherite Sword"},
+    Axe = {"Iron Axe", "Golden Axe", "Diamond Axe", "Netherite Axe"}
+}
 
--- Get current weapon
+-- Get current weapon (only returns if matches selected category)
 local function getCurrentWeapon()
     local character = localPlayer.Character
-    if not character then return "Iron Sword" end
+    if not character then return nil end
     
     local tool = character:FindFirstChildOfClass("Tool")
-    if tool then
-        return tool.Name
+    if not tool then return nil end
+    
+    local toolName = tool.Name
+    
+    -- Check if tool matches selected category
+    for _, weapon in ipairs(weaponCategories[selectedCategory]) do
+        if toolName == weapon then
+            return toolName
+        end
     end
     
-    return "Iron Sword"
+    return nil -- Weapon not in selected category
 end
 
 -- Function to reset weapon
@@ -226,6 +162,8 @@ end
 local function attackTarget(targetChar)
     if not targetChar or not Remote then return end
     local weapon = getCurrentWeapon()
+    if not weapon then return end -- No valid weapon equipped
+    
     local args = {
         [1] = targetChar,
         [2] = 1,
@@ -318,6 +256,37 @@ local function useGoldenApple()
     end
 end
 
+-- Hit detection for auto-kick
+local function setupHitDetection()
+    local character = localPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    local lastHealth = humanoid.Health
+    
+    humanoid:GetPropertyChangedSignal("Health"):Connect(function()
+        if not autoKickEnabled then return end
+        
+        if humanoid.Health < lastHealth then
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= localPlayer and player:FindFirstChild("ScriptLoaded") then
+                    local targetChar = player.Character
+                    if targetChar and targetChar:FindFirstChild("HumanoidRootPart") and character:FindFirstChild("HumanoidRootPart") then
+                        local dist = (targetChar.HumanoidRootPart.Position - character.HumanoidRootPart.Position).Magnitude
+                        if dist <= 20 then
+                            kickFromScript(player, "You attacked the script owner!")
+                            notifyAllUsers(player.Name .. " was auto-kicked for attacking " .. localPlayer.Name, "🔨 Auto-Kick")
+                        end
+                    end
+                end
+            end
+        end
+        lastHealth = humanoid.Health
+    end)
+end
+
 -- KillAura loop
 local lastAttack = 0
 local killAuraConnection = nil
@@ -333,6 +302,9 @@ local function startKillAura()
         
         local myChar = localPlayer.Character
         if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return end
+        
+        -- Check if we have a valid weapon equipped
+        if not getCurrentWeapon() then return end
         
         local targets = getTargets()
         if #targets > 0 then
@@ -358,8 +330,30 @@ local function startAutoGoldenApple()
     end)
 end
 
+-- Respawn handler
+localPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    setupHitDetection()
+end)
+
 -- ============ MAIN TAB ============
 local MainTab = Window:CreateTab("Main", 4483362458)
+
+-- Weapon Category Dropdown
+local CategoryDropdown = MainTab:CreateDropdown({
+    Name = "Weapon Category",
+    Options = {"Sword", "Axe"},
+    CurrentOption = "Sword",
+    Flag = "WeaponCategory",
+    Callback = function(option)
+        selectedCategory = option
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Weapon Category",
+            Text = "Now using: " .. option .. "s",
+            Duration = 2
+        })
+    end
+})
 
 local HitboxButton = MainTab:CreateButton({
     Name = "🔴 Load Hitbox Script",
@@ -384,7 +378,7 @@ local Toggle = MainTab:CreateToggle({
             startKillAura()
             game:GetService("StarterGui"):SetCore("SendNotification", {
                 Title = "KillAura",
-                Text = "KillAura ENABLED - Targeting Players + AI",
+                Text = "KillAura ENABLED - Using " .. selectedCategory .. "s",
                 Duration = 2
             })
         else
@@ -478,23 +472,20 @@ if isOwner then
     OwnerTab:CreateLabel("Owner ID: 8114658601")
     OwnerTab:CreateLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    -- AUTO-KICK TOGGLE (Main feature)
+    -- Auto-Kick Toggle
     local AutoKickToggle = OwnerTab:CreateToggle({
         Name = "🔨 Auto-Kick Script Users Who Hit Me",
         CurrentValue = false,
         Flag = "AutoKickToggle",
         Callback = function(value)
-            autoKickScriptUsers = value
+            autoKickEnabled = value
             if value then
+                setupHitDetection()
                 game:GetService("StarterGui"):SetCore("SendNotification", {
                     Title = "Auto-Kick ENABLED",
                     Text = "Anyone using your script who hits you will be kicked!",
                     Duration = 3
                 })
-                -- Setup hit detection if not already
-                if not _G.hitDetectionConnection then
-                    setupHitDetection()
-                end
             else
                 game:GetService("StarterGui"):SetCore("SendNotification", {
                     Title = "Auto-Kick DISABLED",
@@ -529,7 +520,7 @@ if isOwner then
         else
             local userText = "📋 Script Users (" .. #users .. "):\n"
             for i, user in ipairs(users) do
-                userText = userText .. "   " .. i .. ". " .. user.Name .. " (ID: " .. user.UserId .. ")\n"
+                userText = userText .. "   " .. i .. ". " .. user.Name .. "\n"
             end
             UsersListLabel:SetLabel(userText)
         end
@@ -550,7 +541,7 @@ if isOwner then
     
     -- Manual kick input
     local KickInput = OwnerTab:CreateInput({
-        Name = "Enter Player Name to Kick (Manual)",
+        Name = "Enter Player Name to Kick",
         PlaceholderText = "Type exact player name...",
         Flag = "KickPlayerName",
         Callback = function(text)
@@ -581,8 +572,11 @@ if isOwner then
             end
             
             if targetPlayer then
-                kickPlayerFromScript(targetPlayer, "Manually kicked by owner")
+                kickFromScript(targetPlayer, "Manually kicked by owner")
                 notifyAllUsers(targetPlayer.Name .. " was kicked by owner @capmPH", "🔨 PLAYER KICKED")
+                KickButton:SetName("✅ Kicked " .. targetPlayer.Name .. "!")
+                task.wait(2)
+                KickButton:SetName("🔨 MANUAL KICK PLAYER")
                 task.wait(1)
                 updateUsersDisplay()
                 _G.playerToKick = ""
@@ -613,4 +607,16 @@ if isOwner then
         end
     end)
     
-    
+    -- Initial setup
+    updateUsersDisplay()
+    setupHitDetection()
+end
+
+-- ============ INFO TAB ============
+local InfoTab = Window:CreateTab("Info", 4483362458)
+
+InfoTab:CreateLabel("✨ KillAura Script by @capmPH ✨")
+InfoTab:CreateLabel("Targets: Players + AI (Ai, Minion Ai, Juggernaut Ai)")
+InfoTab:CreateLabel("Weapon Categories: Sword or Axe")
+InfoTab:CreateLabel("Type numbers directly into input boxes")
+InfoTab:CreateLabel("Press 'Load Hit
