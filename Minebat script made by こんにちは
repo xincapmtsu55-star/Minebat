@@ -1,0 +1,401 @@
+-- Load Rayfield with error handling
+local success, Rayfield = pcall(function()
+    return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+if not success then
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "Error",
+        Text = "Failed to load Rayfield UI",
+        Duration = 5
+    })
+    return
+end
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local localPlayer = Players.LocalPlayer
+local OWNER_ID = 8114658601
+local isOwner = (localPlayer.UserId == OWNER_ID)
+
+-- Check if Remote exists
+local Remote = nil
+pcall(function()
+    Remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Attack")
+end)
+
+if not Remote then
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "Error",
+        Text = "Attack remote not found! Script may not work.",
+        Duration = 5
+    })
+end
+
+-- Create Window
+local Window = Rayfield:CreateWindow({
+    Name = "MineBAT| by こんにちは",
+    LoadingTitle = "Loading...",
+    LoadingSubtitle = "by こんにちは",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "KillAuraConfig",
+        FileName = "settings"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "",
+        RememberJoins = true
+    },
+    KeySystem = false
+})
+
+local killAuraEnabled = false
+local multiHitEnabled = false
+local attackRange = 30
+local attackDelay = 0.5
+
+-- Weapon list
+local weaponList = {"Iron Sword", "Golden Sword", "Diamond Sword", "Netherite Sword", 
+                    "Iron Axe", "Golden Axe", "Diamond Axe", "Netherite Axe"}
+
+-- Get current weapon
+local function getCurrentWeapon()
+    local character = localPlayer.Character
+    if not character then return "Iron Sword" end
+    
+    local tool = character:FindFirstChildOfClass("Tool")
+    if tool then
+        return tool.Name
+    end
+    
+    return "Iron Sword"
+end
+
+-- Distance check
+local function isInRange(targetChar, myPos)
+    if not targetChar then return false end
+    local rootPart = targetChar:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    return (rootPart.Position - myPos).Magnitude <= attackRange
+end
+
+-- Attack function
+local function attackTarget(targetChar)
+    if not targetChar or not Remote then return end
+    local weapon = getCurrentWeapon()
+    pcall(function()
+        Remote:FireServer(targetChar, 1, nil, weapon)
+    end)
+end
+
+-- Get targets
+local function getTargets()
+    local targets = {}
+    local myChar = localPlayer.Character
+    if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return targets end
+    
+    local myPos = myChar.HumanoidRootPart.Position
+    
+    -- Player targets
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            local char = player.Character
+            if char and char:FindFirstChild("HumanoidRootPart") and isInRange(char, myPos) then
+                table.insert(targets, char)
+            end
+        end
+    end
+    
+    -- AI targets
+    local aiFolder = Workspace:FindFirstChild("Ai")
+    if aiFolder then
+        local aiTargets = {"Minion Ai", "Juggernaut Ai", "Ai"}
+        for _, aiName in ipairs(aiTargets) do
+            local ai = aiFolder:FindFirstChild(aiName)
+            if ai and ai:FindFirstChild("HumanoidRootPart") and isInRange(ai, myPos) then
+                table.insert(targets, ai)
+            end
+        end
+    end
+    
+    return targets
+end
+
+-- Auto Golden Apple
+local autoGoldenAppleEnabled = false
+local goldenAppleHealthThreshold = 50
+local goldenAppleCooldown = false
+local lastGoldenAppleTime = 0
+local goldenAppleDelay = 5
+
+local function useGoldenApple()
+    if not autoGoldenAppleEnabled or goldenAppleCooldown then return end
+    
+    local now = tick()
+    if now - lastGoldenAppleTime < goldenAppleDelay then return end
+    
+    local character = localPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    local healthPercent = (humanoid.Health / humanoid.MaxHealth) * 100
+    
+    if healthPercent <= goldenAppleHealthThreshold then
+        local goldenApple = character:FindFirstChild("Golden Apple")
+        if goldenApple and goldenApple:FindFirstChild("Data") then
+            pcall(function()
+                goldenApple.Data:FireServer(false, false)
+                task.wait(0.1)
+                goldenApple.Data:FireServer(false, true)
+                task.wait(0.1)
+                goldenApple.Data:FireServer(true)
+            end)
+            
+            lastGoldenAppleTime = now
+            goldenAppleCooldown = true
+            task.spawn(function()
+                task.wait(goldenAppleDelay)
+                goldenAppleCooldown = false
+            end)
+        end
+    end
+end
+
+-- KillAura loop
+local lastAttack = 0
+local killAuraConnection = nil
+
+local function startKillAura()
+    if killAuraConnection then killAuraConnection:Disconnect() end
+    
+    killAuraConnection = RunService.Heartbeat:Connect(function()
+        if not killAuraEnabled then return end
+        
+        local now = tick()
+        if now - lastAttack < attackDelay then return end
+        
+        local myChar = localPlayer.Character
+        if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return end
+        
+        local targets = getTargets()
+        if #targets > 0 then
+            if multiHitEnabled then
+                for _, target in pairs(targets) do
+                    attackTarget(target)
+                end
+            else
+                attackTarget(targets[math.random(1, #targets)])
+            end
+            lastAttack = now
+        end
+    end)
+end
+
+-- Auto Golden Apple loop
+local goldenAppleConnection = nil
+
+local function startAutoGoldenApple()
+    if goldenAppleConnection then goldenAppleConnection:Disconnect() end
+    goldenAppleConnection = RunService.Heartbeat:Connect(function()
+        useGoldenApple()
+    end)
+end
+
+-- ============ MAIN TAB ============
+local MainTab = Window:CreateTab("Main", 4483362458)
+
+local HitboxButton = MainTab:CreateButton({
+    Name = "🔴 Load Hitbox Script",
+    Callback = function()
+        pcall(function()
+            loadstring(game:HttpGet("https://pastefy.app/ItfO0tdg/raw"))()
+        end)
+        HitboxButton:SetName("✅ Hitbox Script Loaded!")
+        task.wait(2)
+        HitboxButton:SetName("🔴 Load Hitbox Script")
+    end
+})
+
+local Toggle = MainTab:CreateToggle({
+    Name = "Toggle KillAura",
+    CurrentValue = false,
+    Flag = "ToggleKillAura",
+    Callback = function(value)
+        killAuraEnabled = value
+        if value then
+            startKillAura()
+        end
+    end
+})
+
+local MultiToggle = MainTab:CreateToggle({
+    Name = "Multi-Hit (hit all targets)",
+    CurrentValue = false,
+    Flag = "MultiHitToggle",
+    Callback = function(value)
+        multiHitEnabled = value
+    end
+})
+
+local RangeInput = MainTab:CreateInput({
+    Name = "Attack Range (studs)",
+    PlaceholderText = "30",
+    Flag = "RangeInput",
+    Callback = function(text)
+        local num = tonumber(text)
+        if num then attackRange = math.clamp(num, 5, 100) end
+    end
+})
+
+local SpeedInput = MainTab:CreateInput({
+    Name = "Attack Speed (seconds)",
+    PlaceholderText = "0.5",
+    Flag = "SpeedInput",
+    Callback = function(text)
+        local num = tonumber(text)
+        if num then attackDelay = math.clamp(num, 0.1, 2) end
+    end
+})
+
+-- ============ AUTO GOLDEN APPLE TAB ============
+local GoldenAppleTab = Window:CreateTab("Auto Golden Apple", 4483362458)
+
+local GoldenAppleToggle = GoldenAppleTab:CreateToggle({
+    Name = "Toggle Auto Golden Apple",
+    CurrentValue = false,
+    Flag = "ToggleGoldenApple",
+    Callback = function(value)
+        autoGoldenAppleEnabled = value
+        if value then
+            startAutoGoldenApple()
+        elseif goldenAppleConnection then
+            goldenAppleConnection:Disconnect()
+            goldenAppleConnection = nil
+        end
+    end
+})
+
+local HealthInput = GoldenAppleTab:CreateInput({
+    Name = "Health Threshold (%)",
+    PlaceholderText = "50",
+    Flag = "HealthInput",
+    Callback = function(text)
+        local num = tonumber(text)
+        if num then goldenAppleHealthThreshold = math.clamp(num, 1, 99) end
+    end
+})
+
+local CooldownInput = GoldenAppleTab:CreateInput({
+    Name = "Golden Apple Cooldown (seconds)",
+    PlaceholderText = "5",
+    Flag = "CooldownInput",
+    Callback = function(text)
+        local num = tonumber(text)
+        if num then goldenAppleDelay = math.clamp(num, 1, 10) end
+    end
+})
+
+-- ============ OWNER TAB (ONLY FOR OWNER) ============
+if isOwner then
+    local OwnerTab = Window:CreateTab("👑 Owner Control", 4483362458)
+    
+    OwnerTab:CreateLabel("👋 Welcome Owner @capmPH")
+    OwnerTab:CreateLabel("Owner ID: 8114658601")
+    OwnerTab:CreateLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    local PlayerListLabel = OwnerTab:CreateLabel("━━━ Players Using This Script ━━━")
+    
+    local playerOptions = {"Select a player..."}
+    local selectedPlayer = nil
+    
+    local PlayerDropdown = OwnerTab:CreateDropdown({
+        Name = "Select Player to Kick",
+        Options = playerOptions,
+        CurrentOption = playerOptions[1],
+        Flag = "PlayerKickDropdown",
+        Callback = function(option)
+            selectedPlayer = option
+        end
+    })
+    
+    local function updatePlayerList()
+        local newOptions = {"Select a player..."}
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer then
+                table.insert(newOptions, player.Name .. " (ID: " .. player.UserId .. ")")
+            end
+        end
+        if #newOptions == 1 then
+            table.insert(newOptions, "No other players")
+        end
+        PlayerDropdown:SetOptions(newOptions)
+    end
+    
+    local KickButton = OwnerTab:CreateButton({
+        Name = "🔨 KICK SELECTED PLAYER",
+        Callback = function()
+            if selectedPlayer and selectedPlayer ~= "Select a player..." and selectedPlayer ~= "No other players" then
+                local playerName = selectedPlayer:match("^(.*) %(ID:") or selectedPlayer
+                for _, player in pairs(Players:GetPlayers()) do
+                    if player.Name == playerName then
+                        pcall(function() player:Kick("Kicked by script owner @capmPH") end)
+                        KickButton:SetName("✅ Kicked " .. playerName .. "!")
+                        task.wait(2)
+                        KickButton:SetName("🔨 KICK SELECTED PLAYER")
+                        task.wait(0.5)
+                        updatePlayerList()
+                        break
+                    end
+                end
+            end
+        end
+    })
+    
+    OwnerTab:CreateLabel("Player list auto-refreshes every 3 seconds")
+    
+    task.spawn(function()
+        while true do
+            task.wait(3)
+            pcall(updatePlayerList)
+        end
+    end)
+    
+    OwnerTab:CreateLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    local TotalUsersLabel = OwnerTab:CreateLabel("Total players in server: " .. #Players:GetPlayers())
+    
+    task.spawn(function()
+        while true do
+            task.wait(5)
+            pcall(function()
+                TotalUsersLabel:SetLabel("Total players in server: " .. #Players:GetPlayers())
+            end)
+        end
+    end)
+end
+
+-- ============ INFO TAB ============
+local InfoTab = Window:CreateTab("Info", 4483362458)
+
+InfoTab:CreateLabel("✨ KillAura Script by @capmPH ✨")
+InfoTab:CreateLabel("Targets: Players, Minion AI, Juggernaut AI, Ai")
+InfoTab:CreateLabel("Weapons: All Swords & Axes")
+InfoTab:CreateLabel("Type numbers directly into input boxes")
+InfoTab:CreateLabel("Press 'Load Hitbox Script' for better hitbox detection")
+
+-- Load configuration
+pcall(function()
+    Rayfield:LoadConfiguration()
+end)
+
+-- Success notification
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "KillAura Loaded",
+    Text = "Welcome " .. localPlayer.Name .. "! Script by @capmPH",
+    Duration = 3
+})
