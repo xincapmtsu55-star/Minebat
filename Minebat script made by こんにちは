@@ -80,26 +80,25 @@ local killAuraEnabled = false
 local multiHitEnabled = false
 local attackRange = 30
 local attackDelay = 0.5
-local currentWeaponCache = nil
 
 -- Weapon list
 local weaponList = {"Iron Sword", "Golden Sword", "Diamond Sword", "Netherite Sword", 
                     "Iron Axe", "Golden Axe", "Diamond Axe", "Netherite Axe"}
 
--- Function to get current equipped weapon
+-- Get current weapon
 local function getCurrentWeapon()
     local character = localPlayer.Character
-    if not character then return nil end
+    if not character then return "Iron Sword" end
     
     local tool = character:FindFirstChildOfClass("Tool")
     if tool then
         return tool.Name
     end
     
-    return nil
+    return "Iron Sword"
 end
 
--- Function to reset weapon (unequip and re-equip)
+-- Function to reset weapon
 local function resetWeapon()
     local character = localPlayer.Character
     if not character then return end
@@ -110,41 +109,12 @@ local function resetWeapon()
     local toolName = currentTool.Name
     local backpack = localPlayer:FindFirstChildOfClass("Backpack")
     
-    -- Move weapon to backpack
     currentTool.Parent = backpack
-    
-    -- Wait a bit then move it back to character
     task.wait(0.1)
     
-    -- Find the tool again in backpack
     local toolInBackpack = backpack and backpack:FindFirstChild(toolName)
     if toolInBackpack then
         toolInBackpack.Parent = character
-    end
-end
-
--- Alternative reset method using humanoid
-local function resetWeaponAlt()
-    local character = localPlayer.Character
-    if not character then return end
-    
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
-    local currentTool = character:FindFirstChildOfClass("Tool")
-    if not currentTool then return end
-    
-    local toolName = currentTool.Name
-    
-    -- Unequip by setting to nil
-    humanoid:UnequipTools()
-    
-    task.wait(0.1)
-    
-    -- Re-equip
-    local toolToEquip = character:FindFirstChild(toolName)
-    if toolToEquip then
-        humanoid:EquipTool(toolToEquip)
     end
 end
 
@@ -160,13 +130,17 @@ end
 local function attackTarget(targetChar)
     if not targetChar or not Remote then return end
     local weapon = getCurrentWeapon()
-    if not weapon then return end
+    local args = {
+        [1] = targetChar,
+        [2] = 1,
+        [4] = weapon
+    }
     pcall(function()
-        Remote:FireServer(targetChar, 1, nil, weapon)
+        Remote:FireServer(unpack(args))
     end)
 end
 
--- Get targets
+-- Get targets - FIXED AI DETECTION
 local function getTargets()
     local targets = {}
     local myChar = localPlayer.Character
@@ -174,6 +148,7 @@ local function getTargets()
     
     local myPos = myChar.HumanoidRootPart.Position
     
+    -- Player targets
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= localPlayer then
             local char = player.Character
@@ -183,14 +158,25 @@ local function getTargets()
         end
     end
     
+    -- AI targets - Using the correct structure from your example
     local aiFolder = Workspace:FindFirstChild("Ai")
     if aiFolder then
-        local aiTargets = {"Minion Ai", "Juggernaut Ai", "Ai"}
-        for _, aiName in ipairs(aiTargets) do
-            local ai = aiFolder:FindFirstChild(aiName)
-            if ai and ai:FindFirstChild("HumanoidRootPart") and isInRange(ai, myPos) then
-                table.insert(targets, ai)
-            end
+        -- Check for "Ai" (the one from your example)
+        local mainAi = aiFolder:FindFirstChild("Ai")
+        if mainAi and mainAi:FindFirstChild("HumanoidRootPart") and isInRange(mainAi, myPos) then
+            table.insert(targets, mainAi)
+        end
+        
+        -- Check for "Minion Ai"
+        local minionAi = aiFolder:FindFirstChild("Minion Ai")
+        if minionAi and minionAi:FindFirstChild("HumanoidRootPart") and isInRange(minionAi, myPos) then
+            table.insert(targets, minionAi)
+        end
+        
+        -- Check for "Juggernaut Ai"
+        local juggernautAi = aiFolder:FindFirstChild("Juggernaut Ai")
+        if juggernautAi and juggernautAi:FindFirstChild("HumanoidRootPart") and isInRange(juggernautAi, myPos) then
+            table.insert(targets, juggernautAi)
         end
     end
     
@@ -255,10 +241,6 @@ local function startKillAura()
         local myChar = localPlayer.Character
         if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return end
         
-        -- Check if weapon is equipped
-        local weapon = getCurrentWeapon()
-        if not weapon then return end
-        
         local targets = getTargets()
         if #targets > 0 then
             if multiHitEnabled then
@@ -304,30 +286,24 @@ local Toggle = MainTab:CreateToggle({
     Flag = "ToggleKillAura",
     Callback = function(value)
         if value then
-            -- Turning ON: Reset weapon first then start
-            pcall(function()
-                resetWeapon()
-            end)
+            pcall(function() resetWeapon() end)
             killAuraEnabled = true
             startKillAura()
             game:GetService("StarterGui"):SetCore("SendNotification", {
                 Title = "KillAura",
-                Text = "KillAura ENABLED - Weapon reset!",
+                Text = "KillAura ENABLED - Targeting Players + AI",
                 Duration = 2
             })
         else
-            -- Turning OFF: Reset weapon and stop
             killAuraEnabled = false
             if killAuraConnection then
                 killAuraConnection:Disconnect()
                 killAuraConnection = nil
             end
-            pcall(function()
-                resetWeapon()
-            end)
+            pcall(function() resetWeapon() end)
             game:GetService("StarterGui"):SetCore("SendNotification", {
                 Title = "KillAura",
-                Text = "KillAura DISABLED - Weapon reset!",
+                Text = "KillAura DISABLED",
                 Duration = 2
             })
         end
@@ -409,7 +385,6 @@ if isOwner then
     OwnerTab:CreateLabel("Owner ID: 8114658601")
     OwnerTab:CreateLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    -- Get script users function
     local function getScriptUsers()
         local users = {}
         for _, player in pairs(Players:GetPlayers()) do
@@ -420,10 +395,8 @@ if isOwner then
         return users
     end
     
-    -- Label to show current script users
     local UsersListLabel = OwnerTab:CreateLabel("Loading script users...")
     
-    -- Function to update the users list display
     local function updateUsersDisplay()
         local users = getScriptUsers()
         if #users == 0 then
@@ -437,7 +410,6 @@ if isOwner then
         end
     end
     
-    -- Refresh button
     local RefreshButton = OwnerTab:CreateButton({
         Name = "🔄 Refresh User List",
         Callback = function()
@@ -450,7 +422,6 @@ if isOwner then
     
     OwnerTab:CreateLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    -- Input for player name to kick
     local KickInput = OwnerTab:CreateInput({
         Name = "Enter Player Name to Kick",
         PlaceholderText = "Type exact player name...",
@@ -460,7 +431,6 @@ if isOwner then
         end
     })
     
-    -- Kick button
     local KickButton = OwnerTab:CreateButton({
         Name = "🔨 KICK PLAYER",
         Callback = function()
@@ -483,7 +453,6 @@ if isOwner then
             end
             
             if targetPlayer then
-                -- Notify all script users
                 for _, player in pairs(Players:GetPlayers()) do
                     if player:FindFirstChild("ScriptLoaded") then
                         pcall(function()
@@ -496,7 +465,6 @@ if isOwner then
                     end
                 end
                 
-                -- Kick the player
                 pcall(function() 
                     targetPlayer:Kick("Kicked by script owner @capmPH") 
                 end)
@@ -519,13 +487,8 @@ if isOwner then
     
     OwnerTab:CreateLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    -- Auto-refresh label
-    local AutoRefreshLabel = OwnerTab:CreateLabel("Auto-refreshing every 5 seconds...")
-    
-    -- Total users count
     local TotalLabel = OwnerTab:CreateLabel("Total script users (excluding you): 0")
     
-    -- Auto refresh loop
     task.spawn(function()
         while true do
             task.wait(5)
@@ -537,7 +500,6 @@ if isOwner then
         end
     end)
     
-    -- Initial update
     updateUsersDisplay()
 end
 
@@ -545,7 +507,7 @@ end
 local InfoTab = Window:CreateTab("Info", 4483362458)
 
 InfoTab:CreateLabel("✨ KillAura Script by @capmPH ✨")
-InfoTab:CreateLabel("Targets: Players, Minion AI, Juggernaut AI, Ai")
+InfoTab:CreateLabel("Targets: Players + AI (Ai, Minion Ai, Juggernaut Ai)")
 InfoTab:CreateLabel("Weapons: All Swords & Axes")
 InfoTab:CreateLabel("Type numbers directly into input boxes")
 InfoTab:CreateLabel("Press 'Load Hitbox Script' for better hitbox detection")
@@ -553,34 +515,6 @@ InfoTab:CreateLabel("━━━━━━━━━━━━━━━━━━━�
 InfoTab:CreateLabel("🔄 Weapon resets when toggling KillAura ON/OFF")
 InfoTab:CreateLabel("📢 When someone executes this script,")
 InfoTab:CreateLabel("   ALL script users will be notified!")
-InfoTab:CreateLabel("👑 Owner can kick any script user by typing name")
-
--- Listen for new script users
-Players.PlayerAdded:Connect(function(newPlayer)
-    task.wait(2)
-    if newPlayer:FindFirstChild("ScriptLoaded") then
-        notifyAllUsers(newPlayer.Name .. " is now using the script! (ID: " .. newPlayer.UserId .. ")", "🔔 New Script User")
-        if isOwner then
-            task.wait(1)
-            pcall(function()
-                if UsersListLabel then updateUsersDisplay() end
-            end)
-        end
-    end
-end)
-
--- Listen for players leaving
-Players.PlayerRemoving:Connect(function(leavingPlayer)
-    if leavingPlayer:FindFirstChild("ScriptLoaded") then
-        notifyAllUsers(leavingPlayer.Name .. " has stopped using the script!", "🔴 Script User Left")
-        if isOwner then
-            task.wait(1)
-            pcall(function()
-                if UsersListLabel then updateUsersDisplay() end
-            end)
-        end
-    end
-end)
 
 -- Load configuration
 pcall(function()
@@ -590,6 +524,6 @@ end)
 -- Success notification
 game:GetService("StarterGui"):SetCore("SendNotification", {
     Title = "KillAura Loaded",
-    Text = "Welcome " .. localPlayer.Name .. "! Script by @capmPH",
+    Text = "Welcome " .. localPlayer.Name .. "! Targeting Players + AI",
     Duration = 3
 })
