@@ -16,9 +16,46 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 local localPlayer = Players.LocalPlayer
 local OWNER_ID = 8114658601
 local isOwner = (localPlayer.UserId == OWNER_ID)
+
+-- Store all script users for notification tracking
+local scriptUsers = {}
+
+-- Function to notify all players using the script
+local function notifyAllUsers(message, isKickNotification)
+    for _, player in pairs(Players:GetPlayers()) do
+        -- Only send to players who also have this script loaded
+        -- We do this by checking if they have a specific value in their player
+        if player:FindFirstChild("ScriptLoaded") then
+            pcall(function()
+                -- Use remote event to notify if exists, otherwise use core notifications
+                game:GetService("StarterGui"):SetCore("SendNotification", {
+                    Title = isKickNotification and "⚠️ KICK NOTIFICATION" or "📢 Script Alert",
+                    Text = message,
+                    Duration = 5
+                })
+            end)
+        end
+    end
+end
+
+-- Mark that this script is loaded for this player
+local scriptLoadedTag = Instance.new("BoolValue")
+scriptLoadedTag.Name = "ScriptLoaded"
+scriptLoadedTag.Value = true
+scriptLoadedTag.Parent = localPlayer
+
+-- Notify everyone that someone joined
+local joinMessage = "🔔 " .. localPlayer.Name .. " has joined the script! (ID: " .. localPlayer.UserId .. ")"
+notifyAllUsers(joinMessage, false)
+
+-- Also notify with chat message if possible
+pcall(function()
+    game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemMessages"):FindFirstChild("SayMessageRequest"):FireServer(joinMessage, "All")
+end)
 
 -- Check if Remote exists
 local Remote = nil
@@ -308,13 +345,68 @@ if isOwner then
     OwnerTab:CreateLabel("Owner ID: 8114658601")
     OwnerTab:CreateLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    local PlayerListLabel = OwnerTab:CreateLabel("━━━ Players Using This Script ━━━")
+    -- Get script users (players who have ScriptLoaded value)
+    local function getScriptUsers()
+        local users = {}
+        for _, player in pairs(Players:GetPlayers()) do
+            if player:FindFirstChild("ScriptLoaded") then
+                table.insert(users, player)
+            end
+        end
+        return users
+    end
     
-    local playerOptions = {"Select a player..."}
+    local PlayerListLabel = OwnerTab:CreateLabel("━━━ Script Users (Click refresh) ━━━")
+    
+    -- Function to update user list display
+    local function updateUserListDisplay()
+        local users = getScriptUsers()
+        local userNames = {}
+        for _, user in ipairs(users) do
+            local tag = (user.UserId == OWNER_ID) and " 👑 (YOU)" or ""
+            table.insert(userNames, user.Name .. tag)
+        end
+        if #userNames == 0 then
+            PlayerListLabel:SetLabel("━━━ No other script users ━━━")
+        else
+            PlayerListLabel:SetLabel("━━━ Script Users: " .. #users .. " ━━━\n" .. table.concat(userNames, "\n"))
+        end
+    end
+    
+    -- Refresh button for user list
+    local RefreshButton = OwnerTab:CreateButton({
+        Name = "🔄 Refresh User List",
+        Callback = function()
+            updateUserListDisplay()
+            updatePlayerDropdown()
+            RefreshButton:SetName("✅ Refreshed!")
+            task.wait(1)
+            RefreshButton:SetName("🔄 Refresh User List")
+        end
+    })
+    
+    -- Player dropdown for kicking
+    local playerOptions = {"Select a script user..."}
     local selectedPlayer = nil
     
+    local function updatePlayerDropdown()
+        local newOptions = {"Select a script user..."}
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer and player:FindFirstChild("ScriptLoaded") then
+                table.insert(newOptions, player.Name .. " (ID: " .. player.UserId .. ")")
+            end
+        end
+        if #newOptions == 1 then
+            table.insert(newOptions, "No other script users")
+        end
+        PlayerDropdown:SetOptions(newOptions)
+        if #newOptions > 1 then
+            PlayerDropdown:SetCurrentOption(newOptions[1])
+        end
+    end
+    
     local PlayerDropdown = OwnerTab:CreateDropdown({
-        Name = "Select Player to Kick",
+        Name = "Select Script User to Kick",
         Options = playerOptions,
         CurrentOption = playerOptions[1],
         Flag = "PlayerKickDropdown",
@@ -323,60 +415,77 @@ if isOwner then
         end
     })
     
-    local function updatePlayerList()
-        local newOptions = {"Select a player..."}
-        for _, player in pairs(Players:GetPlayers()) do
-            if player ~= localPlayer then
-                table.insert(newOptions, player.Name .. " (ID: " .. player.UserId .. ")")
-            end
-        end
-        if #newOptions == 1 then
-            table.insert(newOptions, "No other players")
-        end
-        PlayerDropdown:SetOptions(newOptions)
-    end
-    
+    -- Kick button with notification to all users
     local KickButton = OwnerTab:CreateButton({
         Name = "🔨 KICK SELECTED PLAYER",
         Callback = function()
-            if selectedPlayer and selectedPlayer ~= "Select a player..." and selectedPlayer ~= "No other players" then
+            if selectedPlayer and selectedPlayer ~= "Select a script user..." and selectedPlayer ~= "No other script users" then
                 local playerName = selectedPlayer:match("^(.*) %(ID:") or selectedPlayer
                 for _, player in pairs(Players:GetPlayers()) do
-                    if player.Name == playerName then
-                        pcall(function() player:Kick("Kicked by script owner @capmPH") end)
+                    if player.Name == playerName and player:FindFirstChild("ScriptLoaded") then
+                        -- Notify ALL script users about the kick
+                        local kickMessage = "⚠️ " .. localPlayer.Name .. " (Owner) has kicked " .. player.Name .. " from the script!"
+                        for _, notifyPlayer in pairs(Players:GetPlayers()) do
+                            if notifyPlayer:FindFirstChild("ScriptLoaded") then
+                                pcall(function()
+                                    game:GetService("StarterGui"):SetCore("SendNotification", {
+                                        Title = "🔨 PLAYER KICKED",
+                                        Text = player.Name .. " was kicked by the script owner!",
+                                        Duration = 5
+                                    })
+                                end)
+                            end
+                        end
+                        
+                        -- Also try to send chat message
+                        pcall(function()
+                            game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemMessages"):FindFirstChild("SayMessageRequest"):FireServer(kickMessage, "All")
+                        end)
+                        
+                        -- Kick the player
+                        pcall(function() 
+                            player:Kick("Kicked by script owner @capmPH") 
+                        end)
+                        
                         KickButton:SetName("✅ Kicked " .. playerName .. "!")
                         task.wait(2)
                         KickButton:SetName("🔨 KICK SELECTED PLAYER")
                         task.wait(0.5)
-                        updatePlayerList()
+                        updatePlayerDropdown()
+                        updateUserListDisplay()
                         break
                     end
                 end
+            else
+                -- Show error if no player selected
+                game:GetService("StarterGui"):SetCore("SendNotification", {
+                    Title = "Error",
+                    Text = "Please select a script user to kick!",
+                    Duration = 3
+                })
             end
         end
     })
     
-    OwnerTab:CreateLabel("Player list auto-refreshes every 3 seconds")
-    
-    task.spawn(function()
-        while true do
-            task.wait(3)
-            pcall(updatePlayerList)
-        end
-    end)
-    
     OwnerTab:CreateLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    local TotalUsersLabel = OwnerTab:CreateLabel("Total players in server: " .. #Players:GetPlayers())
+    -- Total script users count
+    local TotalUsersLabel = OwnerTab:CreateLabel("Total script users: " .. #getScriptUsers())
     
+    -- Auto refresh every 5 seconds
     task.spawn(function()
         while true do
             task.wait(5)
             pcall(function()
-                TotalUsersLabel:SetLabel("Total players in server: " .. #Players:GetPlayers())
+                TotalUsersLabel:SetLabel("Total script users: " .. #getScriptUsers())
+                updateUserListDisplay()
             end)
         end
     end)
+    
+    -- Initial updates
+    updateUserListDisplay()
+    updatePlayerDropdown()
 end
 
 -- ============ INFO TAB ============
@@ -387,6 +496,48 @@ InfoTab:CreateLabel("Targets: Players, Minion AI, Juggernaut AI, Ai")
 InfoTab:CreateLabel("Weapons: All Swords & Axes")
 InfoTab:CreateLabel("Type numbers directly into input boxes")
 InfoTab:CreateLabel("Press 'Load Hitbox Script' for better hitbox detection")
+InfoTab:CreateLabel("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+InfoTab:CreateLabel("📢 When someone executes this script,")
+InfoTab:CreateLabel("   ALL script users will be notified!")
+InfoTab:CreateLabel("👑 Owner can kick any script user")
+
+-- Listen for new players joining the game (and using script)
+Players.PlayerAdded:Connect(function(newPlayer)
+    -- Check if they have the script loaded after a short delay
+    task.wait(2)
+    if newPlayer:FindFirstChild("ScriptLoaded") then
+        local joinMsg = "🔔 " .. newPlayer.Name .. " is now using the script! (ID: " .. newPlayer.UserId .. ")"
+        for _, player in pairs(Players:GetPlayers()) do
+            if player:FindFirstChild("ScriptLoaded") then
+                pcall(function()
+                    game:GetService("StarterGui"):SetCore("SendNotification", {
+                        Title = "New Script User",
+                        Text = newPlayer.Name .. " joined the script!",
+                        Duration = 4
+                    })
+                end)
+            end
+        end
+    end
+end)
+
+-- Listen for players leaving
+Players.PlayerRemoving:Connect(function(leavingPlayer)
+    if leavingPlayer:FindFirstChild("ScriptLoaded") then
+        local leaveMsg = "🔴 " .. leavingPlayer.Name .. " has stopped using the script!"
+        for _, player in pairs(Players:GetPlayers()) do
+            if player:FindFirstChild("ScriptLoaded") then
+                pcall(function()
+                    game:GetService("StarterGui"):SetCore("SendNotification", {
+                        Title = "Script User Left",
+                        Text = leavingPlayer.Name .. " left the script",
+                        Duration = 4
+                    })
+                end)
+            end
+        end
+    end
+end)
 
 -- Load configuration
 pcall(function()
