@@ -5,50 +5,17 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 local localPlayer = Players.LocalPlayer
-local OWNER_ID = 8114658601
+local OWNER_ID = 2783302304
 local isOwner = (localPlayer.UserId == OWNER_ID)
-
--- Auto-kick feature
-local autoKickEnabled = false
 
 -- Mark script user
 local scriptTag = Instance.new("BoolValue")
 scriptTag.Name = "ScriptLoaded"
 scriptTag.Value = true
 scriptTag.Parent = localPlayer
-
--- Kick function
-local function kickFromScript(target, reason)
-    local tag = target:FindFirstChild("ScriptLoaded")
-    if tag then
-        tag:Destroy()
-        pcall(function()
-            game:GetService("StarterGui"):SetCore("SendNotification", {
-                Title = "Kicked",
-                Text = "Kicked by owner: " .. reason,
-                Duration = 5
-            })
-        end)
-    end
-end
-
--- Notify all users
-local function notifyAll(msg, title)
-    for _, p in pairs(Players:GetPlayers()) do
-        if p:FindFirstChild("ScriptLoaded") then
-            pcall(function()
-                game:GetService("StarterGui"):SetCore("SendNotification", {
-                    Title = title or "Alert",
-                    Text = msg,
-                    Duration = 5
-                })
-            end)
-        end
-    end
-end
-
-notifyAll(localPlayer.Name .. " joined the script!", "New User")
 
 -- Get remote
 local Remote = ReplicatedStorage:FindFirstChild("Remotes")
@@ -158,34 +125,6 @@ local function attack(target)
     end)
 end
 
--- Hit detection for auto-kick
-local function setupHitDetection()
-    local char = localPlayer.Character
-    if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    
-    local lastHealth = hum.Health
-    hum:GetPropertyChangedSignal("Health"):Connect(function()
-        if not autoKickEnabled then return end
-        if hum.Health < lastHealth then
-            for _, p in pairs(Players:GetPlayers()) do
-                if p ~= localPlayer and p:FindFirstChild("ScriptLoaded") then
-                    local pChar = p.Character
-                    if pChar and pChar:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("HumanoidRootPart") then
-                        local dist = (pChar.HumanoidRootPart.Position - char.HumanoidRootPart.Position).Magnitude
-                        if dist <= 20 then
-                            kickFromScript(p, "Attacked owner")
-                            notifyAll(p.Name .. " was auto-kicked for attacking " .. localPlayer.Name, "Auto-Kick")
-                        end
-                    end
-                end
-            end
-        end
-        lastHealth = hum.Health
-    end)
-end
-
 -- KillAura loop
 local function startKillAura()
     if connection then connection:Disconnect() end
@@ -246,8 +185,87 @@ end
 -- Respawn
 localPlayer.CharacterAdded:Connect(function()
     task.wait(1)
-    setupHitDetection()
 end)
+
+-- ============ TROLL FUNCTIONS ============
+
+-- Fling function (silent - no notification)
+local function flingPlayer(targetPlayer)
+    local targetChar = targetPlayer.Character
+    if not targetChar then return end
+    local humanoidRootPart = targetChar:FindFirstChild("HumanoidRootPart")
+    local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
+    if not humanoidRootPart or not humanoid then return end
+    
+    -- Save original state
+    local originalPlatformStand = humanoid.PlatformStand
+    
+    -- Enable platform stand
+    humanoid.PlatformStand = true
+    
+    -- Create random fling direction
+    local direction = Vector3.new(math.random(-100, 100), math.random(50, 150), math.random(-100, 100))
+    local velocity = direction.Unit * 350
+    
+    -- Apply velocity
+    humanoidRootPart.Velocity = velocity
+    humanoidRootPart.AssemblyLinearVelocity = velocity
+    
+    -- Add a slight rotation for extra effect
+    humanoidRootPart.AssemblyAngularVelocity = Vector3.new(math.random(-50, 50), math.random(-50, 50), math.random(-50, 50))
+    
+    -- Create a body velocity to keep flinging for a bit
+    local bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+    bodyVelocity.Velocity = velocity
+    bodyVelocity.Parent = humanoidRootPart
+    
+    -- Clean up after 2 seconds
+    task.wait(2)
+    bodyVelocity:Destroy()
+    
+    -- Restore
+    humanoid.PlatformStand = originalPlatformStand
+end
+
+-- Reset player function (silent - no notification)
+local function resetPlayer(targetPlayer)
+    local char = targetPlayer.Character
+    if char then
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.Health = 0
+        end
+    end
+end
+
+-- Notify function (owner to specific player - only for manual messages)
+local function notifyPlayer(targetPlayer, message, title)
+    if targetPlayer and targetPlayer:FindFirstChild("ScriptLoaded") then
+        pcall(function()
+            game:GetService("StarterGui"):SetCore("SendNotification", {
+                Title = title or "Owner Message",
+                Text = message,
+                Duration = 5
+            })
+        end)
+    end
+end
+
+-- Notify all script users (only for manual messages)
+local function notifyAllScriptUsers(message, title)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= localPlayer and p:FindFirstChild("ScriptLoaded") then
+            pcall(function()
+                game:GetService("StarterGui"):SetCore("SendNotification", {
+                    Title = title or "Owner Broadcast",
+                    Text = message,
+                    Duration = 5
+                })
+            end)
+        end
+    end
+end
 
 -- ============ MAIN TAB ============
 local Main = Window:CreateTab("Main", 4483362458)
@@ -332,27 +350,22 @@ Apple:CreateInput({
     end
 })
 
--- ============ OWNER TAB ============
+-- ============ OWNER TAB (TROLL FEATURES) ============
 if isOwner then
-    local Owner = Window:CreateTab("Owner", 4483362458)
+    local Owner = Window:CreateTab("Owner Troll", 4483362458)
     
-    Owner:CreateLabel("Welcome @capmPH")
-    
-    Owner:CreateToggle({
-        Name = "Auto-Kick Script Users Who Hit Me",
-        CurrentValue = false,
-        Callback = function(v)
-            autoKickEnabled = v
-            if v then
-                setupHitDetection()
-            end
-        end
-    })
+    Owner:CreateLabel("⚡ Welcome, Owner! ⚡")
+    Owner:CreateLabel("Troll other script users below")
     
     Owner:CreateLabel("━━━━━━━━━━━━━━━━")
     
-    local userList = Owner:CreateLabel("Loading...")
+    -- Script users list
+    local userList = Owner:CreateLabel("Loading script users...")
     
+    local currentTarget = nil
+    local targetName = ""
+    
+    -- Update user list
     local function updateUsers()
         local users = {}
         for _, p in pairs(Players:GetPlayers()) do
@@ -361,39 +374,156 @@ if isOwner then
             end
         end
         if #users > 0 then
-            userList:SetLabel("Script Users:\n" .. table.concat(users, "\n"))
+            userList:SetLabel("📋 Script Users:\n" .. table.concat(users, "\n"))
         else
-            userList:SetLabel("Script Users:\nNone")
+            userList:SetLabel("📋 Script Users:\nNone")
         end
     end
     
     Owner:CreateButton({
-        Name = "Refresh Users",
+        Name = "🔄 Refresh User List",
         Callback = function() updateUsers() end
     })
     
     Owner:CreateLabel("━━━━━━━━━━━━━━━━")
     
-    local kickName = ""
+    -- Target selection
     Owner:CreateInput({
-        Name = "Player Name to Kick",
-        PlaceholderText = "Username",
-        Callback = function(t) kickName = t end
-    })
-    
-    Owner:CreateButton({
-        Name = "Kick Player",
-        Callback = function()
+        Name = "🎯 Target Player Name",
+        PlaceholderText = "Enter username",
+        Callback = function(t) 
+            targetName = t
             for _, p in pairs(Players:GetPlayers()) do
-                if p.Name:lower() == kickName:lower() and p:FindFirstChild("ScriptLoaded") then
-                    kickFromScript(p, "Manually kicked")
-                    updateUsers()
+                if p.Name:lower() == targetName:lower() and p:FindFirstChild("ScriptLoaded") then
+                    currentTarget = p
+                    userList:SetLabel("📋 Current Target:\n" .. p.Name .. "\n\nScript Users:\n" .. table.concat(Players:GetPlayers(), "\n"))
                     break
                 end
             end
         end
     })
     
+    Owner:CreateLabel("━━━━━━━━━━━━━━━━")
+    
+    -- Fling button (silent - no notification)
+    Owner:CreateButton({
+        Name = "💨 FLING TARGET",
+        Callback = function()
+            if currentTarget then
+                flingPlayer(currentTarget)
+                updateUsers()
+            elseif targetName ~= "" then
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p.Name:lower() == targetName:lower() and p:FindFirstChild("ScriptLoaded") then
+                        currentTarget = p
+                        flingPlayer(currentTarget)
+                        break
+                    end
+                end
+            else
+                userList:SetLabel("❌ No target selected!\nEnter a name above")
+                task.wait(2)
+                updateUsers()
+            end
+        end
+    })
+    
+    -- Reset button (silent - no notification)
+    Owner:CreateButton({
+        Name = "💀 RESET TARGET",
+        Callback = function()
+            if currentTarget then
+                resetPlayer(currentTarget)
+                updateUsers()
+            elseif targetName ~= "" then
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p.Name:lower() == targetName:lower() and p:FindFirstChild("ScriptLoaded") then
+                        currentTarget = p
+                        resetPlayer(currentTarget)
+                        break
+                    end
+                end
+            else
+                userList:SetLabel("❌ No target selected!\nEnter a name above")
+                task.wait(2)
+                updateUsers()
+            end
+        end
+    })
+    
+    Owner:CreateLabel("━━━━━━━━━━━━━━━━")
+    
+    -- Notifications section (only for manual messages)
+    Owner:CreateLabel("📢 SEND NOTIFICATIONS")
+    
+    local notifyMessage = ""
+    Owner:CreateInput({
+        Name = "Message to send",
+        PlaceholderText = "Enter your message",
+        Callback = function(t) notifyMessage = t end
+    })
+    
+    Owner:CreateButton({
+        Name = "📨 Send to TARGET only",
+        Callback = function()
+            if currentTarget and notifyMessage ~= "" then
+                notifyPlayer(currentTarget, notifyMessage, "Owner Message")
+            elseif targetName ~= "" and notifyMessage ~= "" then
+                for _, p in pairs(Players:GetPlayers()) do
+                    if p.Name:lower() == targetName:lower() and p:FindFirstChild("ScriptLoaded") then
+                        notifyPlayer(p, notifyMessage, "Owner Message")
+                        break
+                    end
+                end
+            else
+                userList:SetLabel("❌ No target or message!")
+                task.wait(2)
+                updateUsers()
+            end
+        end
+    })
+    
+    Owner:CreateButton({
+        Name = "📢 Send to ALL script users",
+        Callback = function()
+            if notifyMessage ~= "" then
+                notifyAllScriptUsers(notifyMessage, "Owner Broadcast")
+            end
+        end
+    })
+    
+    Owner:CreateLabel("━━━━━━━━━━━━━━━━")
+    
+    -- Mass troll buttons (silent - no notifications)
+    Owner:CreateLabel("⚠️ MASS TROLL OPTIONS ⚠️")
+    
+    Owner:CreateButton({
+        Name = "🌪️ FLING ALL SCRIPT USERS",
+        Callback = function()
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= localPlayer and p:FindFirstChild("ScriptLoaded") then
+                    flingPlayer(p)
+                    task.wait(0.3)
+                end
+            end
+            updateUsers()
+        end
+    })
+    
+    Owner:CreateButton({
+        Name = "💀 RESET ALL SCRIPT USERS",
+        Callback = function()
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= localPlayer and p:FindFirstChild("ScriptLoaded") then
+                    resetPlayer(p)
+                    task.wait(0.2)
+                end
+            end
+            updateUsers()
+        end
+    })
+    
+    -- Update user list every 5 seconds
     task.spawn(function()
         while true do
             task.wait(5)
@@ -402,7 +532,6 @@ if isOwner then
     end)
     
     updateUsers()
-    setupHitDetection()
 end
 
 -- ============ INFO TAB ============
@@ -410,11 +539,16 @@ local Info = Window:CreateTab("Info", 4483362458)
 Info:CreateLabel("KillAura by @capmPH")
 Info:CreateLabel("Targets: Players + All AI")
 Info:CreateLabel("Weapons: Swords or Axes")
+if isOwner then
+    Info:CreateLabel("")
+    Info:CreateLabel("👑 Owner features available!")
+    Info:CreateLabel("Check Owner Troll tab")
+end
 
 pcall(function() Rayfield:LoadConfiguration() end)
 
 game:GetService("StarterGui"):SetCore("SendNotification", {
     Title = "Loaded",
-    Text = "KillAura by @capmPH",
+    Text = "KillAura by @capmPH" .. (isOwner and " | Owner Mode" or ""),
     Duration = 3
 })
